@@ -1,0 +1,306 @@
+# AI Traffic Management System - Design Document
+
+## 1. System Architecture
+
+### 1.1 High-Level Architecture
+```
+┌─────────────┐      HTTP      ┌──────────────┐      ┌─────────────┐
+│   Browser   │ ◄────────────► │   FastAPI    │ ◄───►│ YOLOv8 Model│
+│  (Frontend) │                │   Backend    │      │  (best.pt)  │
+└─────────────┘                └──────────────┘      └─────────────┘
+```
+
+### 1.2 Component Overview
+- **Frontend**: Single HTML page with JavaScript for image upload and result display
+- **Backend**: FastAPI application with endpoints for detection
+- **Model Layer**: YOLOv8 model loaded at startup for vehicle detection
+- **Business Logic**: Traffic light timing calculation based on vehicle count
+
+## 2. Project Structure
+
+```
+ai-traffic-management/
+├── backend/
+│   ├── main.py                 # FastAPI application entry point
+│   ├── models.py               # Pydantic models for request/response
+│   ├── detector.py             # YOLO detection logic
+│   ├── traffic_logic.py        # Traffic light timing logic
+│   ├── config.py               # Configuration settings
+│   └── requirements.txt        # Python dependencies
+├── frontend/
+│   ├── index.html              # Main HTML page
+│   ├── styles.css              # CSS styling
+│   └── app.js                  # JavaScript logic
+├── models/
+│   └── best.pt                 # YOLOv8 trained model
+├── uploads/                    # Temporary upload directory
+├── .gitignore
+└── README.md
+```
+
+## 3. Backend Design
+
+### 3.1 FastAPI Application (main.py)
+```python
+# Key components:
+- FastAPI app initialization
+- CORS middleware for frontend access
+- Model loading at startup (@app.on_event("startup"))
+- Static file serving for frontend
+- Upload endpoint: POST /api/detect
+- Health check endpoint: GET /api/health
+```
+
+### 3.2 Detection Module (detector.py)
+```python
+class VehicleDetector:
+    - __init__(model_path): Load YOLO model
+    - detect(image): Run inference
+    - draw_boxes(image, detections): Annotate image
+    - get_statistics(detections): Calculate counts and confidence
+```
+
+### 3.3 Traffic Logic Module (traffic_logic.py)
+```python
+def calculate_traffic_timing(vehicle_count):
+    if vehicle_count < 5:
+        return {"light": "green", "duration": 10, "reason": "Low traffic"}
+    elif vehicle_count < 12:
+        return {"light": "green", "duration": 25, "reason": "Moderate traffic"}
+    else:
+        return {"light": "green", "duration": 40, "reason": "Heavy traffic"}
+```
+
+### 3.4 Data Models (models.py)
+```python
+# Pydantic models:
+- DetectionResult: Single detection with class, confidence, bbox
+- TrafficDecision: Light color, duration, reason
+- DetectionResponse: Complete API response
+- ErrorResponse: Error handling
+```
+
+### 3.5 Configuration (config.py)
+```python
+# Settings:
+- MODEL_PATH: Path to best.pt
+- MAX_FILE_SIZE: 10MB
+- ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png']
+- CONFIDENCE_THRESHOLD: 0.25
+- UPLOAD_DIR: './uploads'
+```
+
+## 4. Frontend Design
+
+### 4.1 HTML Structure (index.html)
+```html
+- Header with title
+- Upload section (drag-and-drop + file input)
+- Results section:
+  - Annotated image display
+  - Statistics panel (total, cars, trucks, confidence)
+  - Traffic decision panel
+- Loading indicator
+- Error message display
+```
+
+### 4.2 JavaScript Logic (app.js)
+```javascript
+// Key functions:
+- handleFileUpload(): Process file selection
+- uploadImage(): Send image to backend API
+- displayResults(data): Render detection results
+- displayError(message): Show error messages
+- resetUI(): Clear previous results
+```
+
+### 4.3 Styling (styles.css)
+```css
+// Design elements:
+- Modern card-based layout
+- Responsive grid system
+- Color scheme: Blue/Green for traffic theme
+- Hover effects and transitions
+- Mobile-friendly design
+```
+
+## 5. API Specification
+
+### 5.1 Detection Endpoint
+```
+POST /api/detect
+Content-Type: multipart/form-data
+
+Request:
+- file: Image file (JPEG/PNG)
+
+Response (200 OK):
+{
+  "success": true,
+  "total_vehicles": 8,
+  "cars": 6,
+  "trucks": 2,
+  "average_confidence": 0.87,
+  "traffic_decision": {
+    "light": "green",
+    "duration": 25,
+    "reason": "Moderate traffic (5-11 vehicles)"
+  },
+  "detections": [
+    {
+      "class": "car",
+      "confidence": 0.92,
+      "bbox": [100, 150, 300, 400]
+    }
+  ],
+  "annotated_image": "data:image/jpeg;base64,..."
+}
+
+Response (400 Bad Request):
+{
+  "success": false,
+  "error": "Invalid file format"
+}
+
+Response (500 Internal Server Error):
+{
+  "success": false,
+  "error": "Detection failed: [error details]"
+}
+```
+
+### 5.2 Health Check Endpoint
+```
+GET /api/health
+
+Response (200 OK):
+{
+  "status": "healthy",
+  "model_loaded": true
+}
+```
+
+## 6. Detection Logic
+
+### 6.1 YOLO Model Integration
+1. Load model at startup using ultralytics library
+2. Accept image as numpy array or PIL Image
+3. Run inference with confidence threshold
+4. Filter detections for 'car' and 'truck' classes
+5. Extract bounding boxes and confidence scores
+
+### 6.2 Image Processing Pipeline
+1. Receive uploaded image
+2. Validate format and size
+3. Convert to RGB if needed
+4. Run YOLO detection
+5. Draw bounding boxes on copy of image
+6. Encode annotated image to base64
+7. Calculate statistics
+8. Apply traffic logic
+9. Return JSON response
+
+## 7. Error Handling
+
+### 7.1 Backend Error Scenarios
+- Invalid file format → 400 Bad Request
+- File too large → 413 Payload Too Large
+- Model not loaded → 503 Service Unavailable
+- Detection failure → 500 Internal Server Error
+- No file provided → 400 Bad Request
+
+### 7.2 Frontend Error Handling
+- Network errors → Display user-friendly message
+- Invalid response → Show error notification
+- File validation → Prevent upload of invalid files
+- Loading states → Show spinner during processing
+
+## 8. Dependencies
+
+### 8.1 Backend Dependencies
+```
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+ultralytics==8.0.200
+opencv-python==4.8.1.78
+pillow==10.1.0
+numpy==1.24.3
+pydantic==2.5.0
+```
+
+### 8.2 Frontend Dependencies
+- No external dependencies (vanilla JavaScript)
+- Modern browser with ES6 support
+
+## 9. Deployment Considerations
+
+### 9.1 Production Checklist
+- Set proper CORS origins
+- Configure file size limits
+- Enable logging (INFO level minimum)
+- Set up error monitoring
+- Use environment variables for configuration
+- Implement rate limiting
+- Add request timeout handling
+
+### 9.2 Performance Optimization
+- Model loaded once at startup (singleton pattern)
+- Async file handling
+- Image compression for response
+- Cleanup temporary files after processing
+
+## 10. Testing Strategy
+
+### 10.1 Backend Testing
+- Unit tests for traffic logic
+- Integration tests for detection endpoint
+- Model loading validation
+- Error handling tests
+
+### 10.2 Frontend Testing
+- Manual testing of upload flow
+- Cross-browser compatibility
+- Responsive design validation
+- Error state testing
+
+## 11. Security Considerations
+
+- File type validation (whitelist approach)
+- File size limits to prevent DoS
+- Input sanitization
+- CORS configuration
+- No sensitive data in responses
+- Temporary file cleanup
+
+## 12. Correctness Properties
+
+### Property 1: Traffic Logic Consistency
+**Validates: Requirements 2.4**
+For any vehicle count n:
+- If n < 5, duration must be 10 seconds
+- If 5 ≤ n < 12, duration must be 25 seconds
+- If n ≥ 12, duration must be 40 seconds
+
+### Property 2: Detection Count Accuracy
+**Validates: Requirements 2.3**
+For any detection result:
+- total_vehicles = cars + trucks
+- All counts must be non-negative integers
+- average_confidence must be between 0 and 1
+
+### Property 3: Response Structure Validity
+**Validates: Requirements 3.4**
+For any successful detection:
+- Response contains all required fields
+- annotated_image is valid base64 string
+- Each detection has class, confidence, and bbox
+- bbox contains exactly 4 numeric values
+
+### Property 4: Error Handling Completeness
+**Validates: Requirements 2.5**
+For any invalid input:
+- System returns appropriate error response
+- Error response contains success=false and error message
+- No unhandled exceptions reach the client
+- HTTP status codes are semantically correct
